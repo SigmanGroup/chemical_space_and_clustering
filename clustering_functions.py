@@ -382,11 +382,11 @@ def plot_tsne(features, ID, image, smiles, perplexity, early_exaggeration,learni
     return tsne_df
     
     
-def plot_pca(features, ID, image, smiles, n_components=2, alpha=0.7, color='#7B1B79', marker='o', size=100,  
+def plot_pca(feature_df, features, ID, image, smiles, n_components=2, alpha=0.7, color='#7B1B79', marker='o', size=100,  
              alpha_value_mapping=None, color_mapping=None, marker_mapping=None, size_mapping=None, plot_order=None,
              pc_x='PC1', pc_y='PC2', pc_z=None, font_size=16, type_column=None, response_column=None,
-             export_excel=False, excel_filename="pca_coordinates_df.xlsx",
-             save_plot=False, plot_filename="pca_plot.png", heatmap=False, palette='plasma'):
+             export_excel=False, export_feature_excel=False, excel_filename="pca_coordinates_df.xlsx",
+             save_plot=False, plot_filename="pca_plot.png", feature_filename = "pca_feature_loading.xlsx", heatmap=False, palette='plasma'):
     
     pca = PCA(n_components=n_components)
     pca_results = pca.fit_transform(features)
@@ -452,6 +452,16 @@ def plot_pca(features, ID, image, smiles, n_components=2, alpha=0.7, color='#7B1
     plt.yticks(fontsize=font_size)
     plt.gca().spines[['top', 'right']].set_visible(False)
     plt.grid(False)
+    
+    feature_names = feature_df.columns if isinstance(feature_df, pd.DataFrame) else [f'Feature {i+1}' for i in range(feature_df.shape[1])]
+    feature_contributions = pd.DataFrame(pca.components_.T, 
+                                         index=feature_names, 
+                                         columns=[f'PC{i+1}' for i in range(n_components)])
+                                         
+
+    if export_feature_excel:
+        feature_contributions.to_excel(feature_filename, index=False)
+        print(f"Feature contributions saved to {feature_filename}")
     
     if save_plot:
         plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
