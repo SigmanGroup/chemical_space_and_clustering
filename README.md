@@ -6,4 +6,4 @@ Install the requisite conda environment by running:
 
 ```conda env create --file=chemical_space_and_clustering.yml --name=chem_space_and_clustering```
 
-note: the umap implementation is very sensitive to package versions, if you are running into issues that is most likely the problem
+note: the umap implementation is very sensitive to package versions, if you are running into issues that is most likely the problem. I would suggest downgrading numpy to below < 2.0.0 and seeing if this fixes the issue 
