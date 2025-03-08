@@ -460,7 +460,7 @@ def plot_pca(feature_df, features, ID, image, smiles, n_components=2, alpha=0.7,
                                          
 
     if export_feature_excel:
-        feature_contributions.to_excel(feature_filename, index=False)
+        feature_contributions.to_excel(feature_filename)
         print(f"Feature contributions saved to {feature_filename}")
     
     if save_plot:
