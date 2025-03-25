@@ -275,6 +275,7 @@ def plot_umap(features, ID, image, smiles, n_neighbors, min_dist, distance_metri
 
     elif type_column is not None:
         umap_df['type'] = type_column
+        umap_df['type'] = umap_df['type'].astype(str)
         unique_types = sorted(umap_df['type'].unique())
 
         cmap = cm.get_cmap('tab20', len(unique_types))
@@ -288,6 +289,9 @@ def plot_umap(features, ID, image, smiles, n_neighbors, min_dist, distance_metri
         alpha_value_mapping = alpha_value_mapping or {t: 0.8 for t in unique_types}
 
         for t in unique_types:
+            t = str(t) #corrects error if column contains true/false and is read as a boolean 
+            umap_df['type'] = umap_df['type'].astype(str)
+            
             subset = umap_df[umap_df['type'] == t]
             plt.scatter(subset['UMAP1'], subset['UMAP2'], 
                         alpha=alpha_value_mapping[t], color=color_mapping[t], 
