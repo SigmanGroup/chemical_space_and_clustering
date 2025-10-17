@@ -248,7 +248,55 @@ def int_scatter_dash(df, x_col, y_col, smiles_col=None, id_col=None,molSize=(150
     app.run(debug=True, use_reloader=False, port=8051)
 
 
+### --- dimensionality reduction functions --- ###
+def dim_reduction_umap(features,x_coordinates_label, y_coordinates_label,
+                       n_neighbors, min_dist, n_components, distance_metric, random_state,
+                       excel_export=False, excel_filename):
+    
+    reducer = umap.UMAP(n_neighbors=n_neighbors,
+                        min_dist=min_dist,
+                        n_components=n_components,
+                        metric=distance_metric,
+                        random_state=random_state)
+    
+    umap_results = reducer.fit_transform(features)
+    umap_df = pd.DataFrame(umap_results, columns=[x_coordinates_label, y_coordinates_label])
 
+    umap_df['id'], umap_df['smiles'] = ID, smiles
+
+    if excel_export:
+        umap_df.to_excel(excel_filename, index=False)
+        print(f'UMAP coordinates exported to {excel_filename}')
+
+    return umap_df
+
+### --- Cleaner + generalized plotting functions --- ###
+# def plot_chemical_space (df, x, y, fig_size=(6,6), xlabel=None, ylabel=None,
+#                         marker_size=20, marker_color='blue', alpha=0.7,
+#                         marker_edge_color='black', marker_edge_width=1,
+#                         title=None, save_plot=False, plot_filename=None,
+#                         axis_label_fontsize=12, title_fontsize=14,
+#                         subgroup=True, subgroup_column=None, subgroup_palette='plasma',
+#                         categorical= False, category_dict=None, categorical_palette=None,
+#                         heatmap=False, heatmap_palette='plasma',
+#                         size_col = None, min_size=30, max_size=100,
+#                         alpha_col=None, min_alpha=0.3, max_alpha=1.0,
+#                         marker_col=None):
+    
+#     plt.figure(figsize=fig_size)
+#     if not subgroup and not heatmap:
+#         plt.scatter(df[x], df[y], s=marker_size, c=marker_color, alpha=alpha,
+#                     edgecolor=marker_edge_color, linewidth=marker_edge_width)
+#     elif subgroup and not heatmap:
+#         if subgroup_column is None:
+#             raise ValueError("subgroup_column must be provided when subgroup is True")
+        
+#         if categorical and s
+#             if category_dict is not None:
+#                 type_column_mapped = map_categories(type_column, category_dict)
+#             else:
+#                 type_column_mapped = type_column
+#             if categorical_palette is not None:
 
 # making plots prettier
 def map_alpha_by_col(df, alpha_val_map=None, type_col=None, alpha=0.5):
