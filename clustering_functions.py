@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-import seaborn as sns
 from rdkit import Chem
 import hdbscan
 
@@ -10,17 +9,9 @@ from sklearn.neighbors import NearestNeighbors
 from math import isnan
 from numpy.random import uniform
 
-# import holov# iews as hv
-# hv.extension('bokeh')
-# import bokeh
 from IPython.display import SVG
 from rdkit.Chem.Draw import rdMolDraw2D
-from bokeh.models import HoverTool
 from random import sample
-
-import holoviews as hv
-from holoviews import dim
-hv.extension('bokeh')
 
 import umap
 from sklearn.manifold import TSNE
@@ -36,130 +27,228 @@ from math import isnan
 from numpy.random import uniform
 from sklearn.decomposition import PCA,NMF
 
-import holoviews as hv
-hv.extension('bokeh')
-import bokeh
 from IPython.display import SVG
 from rdkit.Chem.Draw import rdMolDraw2D
-from bokeh.models import HoverTool
-from bokeh.resources import INLINE
-from yellowbrick.cluster import SilhouetteVisualizer
-from bokeh.io import show
 import importlib
 from sklearn.cluster import AgglomerativeClustering, Birch 
 import itertools
 from sklearn.cluster import Birch
 
+import io
+import base64
+import numpy as np
+import pandas as pd
+from dash import Dash, dcc, html, Input, Output, no_update
+import plotly.graph_objects as go
+from rdkit import Chem
+from rdkit.Chem import Draw
 
-#interactive plotting things
-# adapted from https://rdkit.blogspot.com/2020/04/new-drawing-options-in-202003-release.html and https://birdlet.github.io/2018/06/06/rdkit_svg_web/
-def get_mol_svg(df, smiles_col, id_col, image_col = None, molSize=(450,150)):
-    svgs = []
-    if smiles_col == None:
-        raise ValueError('No default SMILES column found, specify column name using smiles_col = "column_name"')
-    else:
-        smiles_col = str(smiles_col)
-        smi_col_loc = df.columns.get_loc(smiles_col)
+### --- interactive plotting functions --- ###
+
+#cycle through n color so each cluster is a unique color
+def n_colors(n): #s = 0.65 is color intensity (0 gray, 1 full color), v = 0.95 is brightness (0 black, 1 full color)
+    return ['#%02x%02x%02x' % tuple(int(255*c) for c in colorsys.hsv_to_rgb(i/n, 0.65, 0.95))
+            for i in range(n)] #'#%02x%02x%02x' is hex formatting
+
+plotly_marker_symbols = ['circle', 'square', 'diamond', 'cross', 'x', 'triangle-up', 'triangle-down',
+    'triangle-left', 'triangle-right', 'star', 'hexagram', 'hourglass', 'bowtie']
+
+### --- convert smiles to png image encoded in base64 --- ###
+def mol_to_png(smiles, molSize=(150,150), debug=False):
+    try:
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError("Invalid SMILES")
+        img = Draw.MolToImage(mol, size=molSize)
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        encoded = base64.b64encode(buffer.getvalue()).decode()
+        return f"data:image/png;base64,{encoded}"
+    except Exception as e:
+        if debug:
+            print(f"Error converting SMILES '{smiles}': {e}")
+        return None
     
-    if id_col == None:
-        raise ValueError('No default id column found, specify column name using id_col = "column_name"')
-    else:
-        id_col = str(id_col)
-        id_col_loc = df.columns.get_loc(id_col)
-        
-    if image_col == None:
-        image_col = 'mol_image'
+### --- helper functions to scale marker style by dataframe --- ###
+def scale_size(series, min_size=10, max_size=100, n_points=None):
+    if series is None:
+        if n_points is None:
+            raise ValueError("Must provide n_points if series is None")
+        return np.array([min_size]*n_points)
+    s = np.array(series)
+    return min_size + (s - s.min()) / (s.max() - s.min() + 1e-9) * (max_size - min_size)
 
-    for i, row in df.iterrows():
-        smiles = row[smiles_col]
-        try:
-            mol = Chem.MolFromSmiles(smiles)
-            img = rdMolDraw2D.MolDraw2DSVG(*molSize)
-            img.DrawMolecule(mol)
-            img.FinishDrawing()
-            svg = img.GetDrawingText().replace('svg:', '')
-            svgs.append(SVG(svg).data)
-        except:
-            print (f'error for ID: {row[id_col]}. Please check SMILES: {smiles}')
-            svgs.append('no SMILES available')
+def scale_alpha(series, min_alpha=0.5, max_alpha=1.0, n_points=None):
+    if series is None:
+        if n_points is None:
+            raise ValueError("Must provide n_points if series is None")
+        return np.array([max_alpha]*n_points)
+    a = np.array(series)
+    return min_alpha + (a - a.min()) / (a.max() - a.min() + 1e-9) * (max_alpha - min_alpha)
+
+def map_marker_symbols(series, n_points=None):
+    if series is None:
+        if n_points is None:
+            raise ValueError("Must provide n_points if series is None")
+        return ['circle']*n_points
+    unique_vals = series.dropna().unique()
+    symbol_map = {val: plotly_marker_symbols[i % len(plotly_marker_symbols)] for i, val in enumerate(unique_vals)}
+    return series.map(symbol_map).fillna('circle')
+
+# --- Main scatterplot function ---
+# reference: https://dash.plotly.com/dash-core-components/tooltip
+def int_scatter_dash(df, x_col, y_col, smiles_col=None, id_col=None,molSize=(150,150), 
+                     marker_size=30, marker_symbol="circle", marker_color='blue',
+                     marker_alpha=0.7, linewidth=1, lincolor='black', plot_title=None,
+                     x_label=None, y_label=None, fig_width=600, fig_height=600,
+                     subgroup=False, subgroup_col=None, subgroup_palette='plasma',
+                     categorical=False, category_dict=None, categorical_palette=None,
+                     size_col=None, min_size=10, max_size=100,
+                     alpha_col=None, min_alpha=0.5, max_alpha=1.0,
+                     marker_col=None, hover_img_width=None, debug=False):
+    
+    if smiles_col:
+        df['mol_image'] = df[smiles_col].apply(lambda smi: mol_to_png(smi, molSize=molSize, debug=debug))
+    else:
+        df['mol_image'] = [None]*len(df)
+    
+    sizes = scale_size(df[size_col] if size_col else None, min_size, max_size, n_points=len(df))
+    alphas = scale_alpha(df[alpha_col] if alpha_col else None, min_alpha, max_alpha, n_points=len(df))
+    symbols = map_marker_symbols(df[marker_col] if marker_col else None, n_points=len(df))
+    
+    if hover_img_width is None:
+        hover_img_width = molSize[0]
+    
+    fig = go.Figure()
+    if not subgroup: #no subgroup normal plot
+        fig.add_trace(go.Scatter(
+            x=df[x_col],
+            y=df[y_col],
+            mode='markers',
+            marker=dict(
+                size=sizes if size_col else marker_size,
+                color=marker_color,
+                symbol=symbols if marker_col else marker_symbol,
+                opacity=alphas if alpha_col else marker_alpha,
+                line=dict(width=linewidth, color=lincolor)
+            ),
+            hoverinfo='none'
+        ))
+    else:
+        if subgroup_col is None:
+            raise ValueError("Please specify a column name for `subgroup_col` when subgroup=True")
+        
+        if categorical: # using discrete color palette
+            if category_dict is None:
+                if categorical_palette is None:
+                    color_list = n_colors(len(df[subgroup_col].dropna().unique()))
+                else:
+                    import plotly.express as px
+                    colors = px.colors.qualitative.__getattribute__(categorical_palette)
+                    unique_groups = df[subgroup_col].dropna().unique()
+                    color_list = (colors * ((len(unique_groups) // len(colors)) + 1))[:len(unique_groups)]
+                category_dict = dict(zip(df[subgroup_col].dropna().unique(), color_list))
             
-    df.insert(smi_col_loc+1, image_col, svgs)
-    return df
-
-# adapted from https://github.com/SigmanGroup/InteractivePlots
-def scatter_plot(
-    dataframe: pd.DataFrame, 
-    x: str,  # x-axis data
-    y: str,  # y-axis data
-    title: str = 'default',  # title of plot
-    x_label: str = 'default',  # axis label to be printed on plot (does not need to match dataframe name)
-    x_range: tuple = None,  # range of x-axis
-    y_label: str = 'default',  # axis label to be printed on plot (does not need to match dataframe name)
-    y_range: tuple = None,  # range of y-axis
-    legend: str = '',  # string with data label if using classifiers/building plots by category
-    svgs: str = None,  # string with column name of svgs 
-    hover_list: list = None,  # list of column names with data to be shown on hover 
-    marker: str = 'o',  # marker type - most of the matplotlib markers are supported (https://matplotlib.org/stable/api/markers_api.html)
-    color: str = '#931319',  # color of markers
-    line_color: str = None,  # color of marker line_color
-    alpha: int = 1,  # transparency of markers
-    groupby: str = None,  # string with column name to group data by
-    height: int = 500,  #plot height (recommended: 500)
-    width: int = 500,  #plot width (recommended: 500)
-    size: int = 10,  # size of markers (recommended: 10-20)
-):
-
-    if x_label == 'default':  # if no x_label provided, use x column name
-        x_label = x
-    if y_label == 'default':  # if no y_label provided, use y column name
-        y_label = y
-
-    if not x_range:
-        x_min = min(dataframe[x]); x_max = max(dataframe[x])
-        x_buffer = abs(x_max-x_min)/10
-        x_range = (x_min-x_buffer, x_max+x_buffer)
-    if not y_range:
-        y_min = min(dataframe[y]); y_max = max(dataframe[y])
-        y_buffer = abs(y_max-y_min)/10
-        y_range = (y_min-y_buffer, y_max+y_buffer)
-
-    if groupby is not None:
-        hover_list = hover_list or []
-        hover_list.insert(0, groupby)
-
-    if svgs == None and labels == None: # no hover information provided
-        if title == 'default':  # if no title provided, define from x, y labels
-            title = f'{y_label} vs. {x_label}'
-        plt = hv.Scatter(dataframe, kdims=[x], vdims=[y], label=legend).opts(title=title, marker=marker, height=height, width=width, color=color, alpha=alpha, size=size, line_color=line_color)
-        
-    else:  # hover information provided, build list of hover tools
-        hover_list.insert(0, y)
-        tooltips = f'<div>end' # beginning of tooltips if no svgs provided
-        if svgs != None:
-            tooltips = f'<div><div>@{svgs}{{safe}}</div>end'  # beginning of tooltips if svgs are provided
-            hover_list.insert(1, svgs)
-        if len(hover_list) < 4:
-            for label in hover_list:
-                if label != svgs and label != y:
-                    tooltips = tooltips.replace('end', f'<div><span style="font-size: 17px; font-weight: bold;">@{label}</span></div>end')
-        else:
-            for label in hover_list:
-                if label != svgs and label != y:
-                    tooltips = tooltips.replace('end', f'<div><span style="font-size: 12px;">{label}: @{label}</span></div>end')
-        
-        tooltips = tooltips.replace('end', '</div>')
-        hover = HoverTool(tooltips=tooltips)
-        
-        if title == 'default':  # if no title provided, define from x, y labels
-            title = f'{y_label} vs. {x_label}'          
-        plt = hv.Scatter(dataframe, kdims=[x], vdims=hover_list, label=legend).opts(title=title, marker=marker, height=height, width=width, tools=[hover], color=color, alpha=alpha, size=size, line_color=line_color)
-        
-        if groupby != None:
-            # color = hv.Cycle(color).values
-            plt = plt.opts(color=groupby, cmap=color)
-
-        return plt
+            for group, color in category_dict.items():
+                subgroup_df = df[df[subgroup_col] == group]
+                fig.add_trace(go.Scatter(
+                    x=subgroup_df[x_col],
+                    y=subgroup_df[y_col],
+                    mode='markers',
+                    marker=dict(
+                        size=sizes[df[subgroup_col] == group] if size_col else marker_size,
+                        color=color,
+                        symbol=symbols[df[subgroup_col] == group] if marker_col else marker_symbol,
+                        opacity=alphas[df[subgroup_col] == group] if alpha_col else marker_alpha,
+                        line=dict(width=linewidth, color=lincolor)
+                    ),
+                    name=str(group),
+                    hoverinfo='none'
+                ))
+        else: # using cont color palette
+            fig.add_trace(go.Scatter(
+                x=df[x_col],
+                y=df[y_col],
+                mode='markers',
+                marker=dict(
+                    size=sizes if size_col else marker_size,
+                    color=df[subgroup_col],
+                    colorscale=subgroup_palette,
+                    symbol=symbols if marker_col else marker_symbol,
+                    opacity=alphas if alpha_col else marker_alpha,
+                    line=dict(width=linewidth, color=lincolor),
+                    colorbar=dict(title=subgroup_col)
+                ),
+                hoverinfo='none'
+            ))
     
+    fig.update_layout(
+        xaxis=dict(range=[df[x_col].min()-1, df[x_col].max()+1]),
+        yaxis=dict(range=[df[y_col].min()-1, df[y_col].max()+1]),
+        width=fig_width,
+        height=fig_height,
+        title=plot_title if plot_title else "",
+        xaxis_title=x_label if x_label else x_col,
+        yaxis_title=y_label if y_label else y_col
+    )
+    
+    # dash app for interactive hover
+    app = Dash(__name__)
+    app.layout = html.Div([
+        dcc.Graph(id="scatter-graph", figure=fig, clear_on_unhover=True),
+        dcc.Tooltip(id="scatter-tooltip", direction="bottom")
+    ])
+    
+    @app.callback(
+        Output("scatter-tooltip", "show"),
+        Output("scatter-tooltip", "bbox"),
+        Output("scatter-tooltip", "children"),
+        Output("scatter-tooltip", "direction"),
+        Input("scatter-graph", "hoverData")
+    )
+    def display_hover(hoverData):
+        if hoverData is None:
+            return False, no_update, no_update, no_update
+
+        idx = hoverData['points'][0]['pointIndex']
+        bbox = hoverData['points'][0]['bbox']
+        y_val = hoverData['points'][0]['y']
+        direction = "bottom" if y_val > (df[y_col].max() + df[y_col].min()) / 2 else "top"
+
+        img_src = df['mol_image'].iloc[idx]
+        id_val = df[id_col].iloc[idx]  
+
+        children = html.Div(
+            [
+                html.Img(
+                    src=img_src,
+                    style={
+                        "width": f"{hover_img_width}px",
+                        "display": "block",
+                        "margin-bottom": "5px",
+                        "border": "1px solid #ccc",
+                        "border-radius": "4px"
+                    }
+                ),
+                html.Div(
+                    f"ID: {id_val}",
+                    style={
+                        "text-align": "center",
+                        "font-weight": "bold",
+                        "font-size": "12px"
+                    }
+                )
+            ],
+            style={"padding": "5px"} 
+        )
+
+        return True, bbox, children, direction
+
+
+    app.run(debug=True, use_reloader=False, port=8051)
+
+
+
 
 # making plots prettier
 def map_alpha_by_col(df, alpha_val_map=None, type_col=None, alpha=0.5):
