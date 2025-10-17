@@ -86,7 +86,7 @@ def get_mol_svg(df, smiles_col, id_col, image_col = None, molSize=(450,150)):
     df.insert(smi_col_loc+1, image_col, svgs)
     return df
 
-
+# adapted from https://github.com/SigmanGroup/InteractivePlots
 def scatter_plot(
     dataframe: pd.DataFrame, 
     x: str,  # x-axis data
