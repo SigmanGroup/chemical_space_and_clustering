@@ -250,8 +250,9 @@ def int_scatter_dash(df, x_col, y_col, smiles_col=None, id_col=None,molSize=(150
 
 ### --- dimensionality reduction functions --- ###
 def dim_reduction_umap(features,x_coordinates_label, y_coordinates_label,
-                       n_neighbors, min_dist, n_components, distance_metric, random_state,
-                       excel_export=False, excel_filename):
+                       id_column, smiles_column, excel_filename,
+                       n_neighbors, min_dist, n_components, distance_metric,
+                       random_state,excel_export=False, ):
     
     reducer = umap.UMAP(n_neighbors=n_neighbors,
                         min_dist=min_dist,
@@ -262,7 +263,7 @@ def dim_reduction_umap(features,x_coordinates_label, y_coordinates_label,
     umap_results = reducer.fit_transform(features)
     umap_df = pd.DataFrame(umap_results, columns=[x_coordinates_label, y_coordinates_label])
 
-    umap_df['id'], umap_df['smiles'] = ID, smiles
+    umap_df['id'], umap_df['smiles'] = id_column, smiles_column
 
     if excel_export:
         umap_df.to_excel(excel_filename, index=False)
@@ -270,33 +271,108 @@ def dim_reduction_umap(features,x_coordinates_label, y_coordinates_label,
 
     return umap_df
 
+def dim_reduction_pca(features, n_components, id_column, smiles_column,
+                      export_pc_coords_excel=False, pc_coords_filename=None,
+                      export_pc_contrib_excel=False, pc_contrib_filename=None):
+    pca = PCA(n_components=n_components)
+    pca_results = pca.fit_transform(features)
+    pca_score = pca.explained_variance_ratio_
+
+    print('Total variance explained by PCs:', round(np.sum(pca_score * 100), 1), '%\n')
+    print("Percentage of explained variance per principal component:")
+    for i, j in enumerate(pca_score):
+        print(f"PC{i+1}   {j * 100:.1f}%")
+
+    pca_df = pd.DataFrame(pca_results, columns=[f'PC{i+1}' for i in range(n_components)])
+    pca_df['id'], pca_df['smiles'] = id_column, smiles_column
+
+    feature_name = features.columns if isinstance(features, pd.DataFrame) else [f'Feature {i+1}' for i in range(features.shape[1])]
+    feature_contributions = pd.DataFrame(pca.components_.T,
+                                          index=feature_name, 
+                                          columns=[f'PC{i+1}' for i in range(n_components)])
+    if export_pc_coords_excel:
+        pca_df.to_excel(pc_coords_filename, index=False)
+        print(f'PCA coordinates exported to {pc_coords_filename}')
+
+    if export_pc_contrib_excel:
+        feature_contributions.to_excel(pc_contrib_filename)
+        print(f'PCA feature contributions exported to {pc_contrib_filename}')
+
+    return pca_df, feature_contributions
+
+def dim_reduction_tsne (features, x_coordinates_label, y_coordinates_label,
+                        n_components, perplexity, learning_rate,
+                        init, random_state, distance_metric
+                        export_excel=False, excel_filename=None):
+    tsne = TSNE (n_components=n_components, perplexity=perplexity,
+                 learning_rate=learning_rate, init=init,
+                 random_state=random_state, metric=distance_metric)
+    tsne_results = tsne.fit_transform(features)
+    tsne_df = pd.DataFrame(tsne_results, columns=[x_coordinates_label, y_coordinates_label])
+    tsne_df['id'], tsne_df['smiles'] = ID, smiles
+
+    if export_excel:
+        tsne_df.to_excel(excel_filename, index=False)
+        print (f'tSNE coordinates exported to {excel_filename}')
+
+    return tsne_df
+
+def feat_v_feat (features, feature_x, feature_y, feature_z):
+
+    chem_space_df = features[[feature_x, feature_y] + ([feature_z] if feature_z else [])].copy()
+    chem_space_df['id'], chem_space_df['smiles'] =  ID, smiles
+    return chem_space_df
+
+
+
 ### --- Cleaner + generalized plotting functions --- ###
-# def plot_chemical_space (df, x, y, fig_size=(6,6), xlabel=None, ylabel=None,
-#                         marker_size=20, marker_color='blue', alpha=0.7,
+# def plot_chemical_space_2D (df, x, y, fig_size=(6,6), xlabel=None, ylabel=None,
+#                         marker_size=20, marker_color='blue', alpha=0.7, marker='o',
 #                         marker_edge_color='black', marker_edge_width=1,
 #                         title=None, save_plot=False, plot_filename=None,
 #                         axis_label_fontsize=12, title_fontsize=14,
 #                         subgroup=True, subgroup_column=None, subgroup_palette='plasma',
 #                         categorical= False, category_dict=None, categorical_palette=None,
-#                         heatmap=False, heatmap_palette='plasma',
+#                         heatmap=False, response_column = None, heatmap_palette='plasma',
 #                         size_col = None, min_size=30, max_size=100,
 #                         alpha_col=None, min_alpha=0.3, max_alpha=1.0,
-#                         marker_col=None):
-    
-#     plt.figure(figsize=fig_size)
+#                         marker_col=None, plot_order=None):
+#     fig, ax = plt.subplots(figsize=fig_size)
 #     if not subgroup and not heatmap:
-#         plt.scatter(df[x], df[y], s=marker_size, c=marker_color, alpha=alpha,
-#                     edgecolor=marker_edge_color, linewidth=marker_edge_width)
+#         ax.scatter(df[x], df[y], s=marker_size, marker=marker, c=marker_color, alpha=alpha,
+#                    edgecolor=marker_edge_color, linewidth=marker_edge_width)
 #     elif subgroup and not heatmap:
 #         if subgroup_column is None:
 #             raise ValueError("subgroup_column must be provided when subgroup is True")
-        
-#         if categorical and s
-#             if category_dict is not None:
-#                 type_column_mapped = map_categories(type_column, category_dict)
-#             else:
-#                 type_column_mapped = type_column
-#             if categorical_palette is not None:
+#         if categorical:
+#             if category_dict is None:
+#                 if categorical_palette is None:
+#                     color_list = n_colors(len(df[subgroup_column].dropna().unique()))
+#                 else:
+#                     colors = cm.get_cmap(categorical_palette, len(df[subgroup_column].dropna().unique()))
+#                     color_list = [colors(i) for i in range(len(df[subgroup_column].dropna().unique()))]
+#                 category_dict = dict(zip(df[subgroup_column].dropna().unique(), color_list))
+#             for group, color in category_dict.items():
+#                 subgroup_df = df[df[subgroup_column] == group]
+#                 ax.scatter(subgroup_df[x], subgroup_df[y],
+#                             s=scale_size(subgroup_df[size_col] if size_col else None, min_size, max_size, n_points=len(subgroup_df)),
+#                             c=color,
+#                             alpha=scale_alpha(subgroup_df[alpha_col] if alpha_col else None, min_alpha, max_alpha, n_points=len(subgroup_df)),
+#                             edgecolor=marker_edge_color,
+#                             linewidth=marker_edge_width,
+#                             marker=marker,
+#                             label=str(group))
+#     elif heatmap and not subgroup:
+#         if response_column is None:
+#             raise ValueError("response_column must be provided when heatmap is True")
+#         else:
+#             norm = plt.Normalize(df[response_column].min(), df[response_column].max())
+#             scalarmap = plt.cm.ScalarMappable(cmap=heatmap_palette, norm=norm)
+#             ax.scatter(df[x], df[y], s=marker_size, c=df[response_column],
+#                        cmap=heatmap_palette, edgecolor=marker_edge_color,
+#                        marker=marker, linewidth=marker_edge_width,
+#                        alpha=alpha)
+#             fig.colorbar(scalarmap, ax=ax, label=response_column)
 
 # making plots prettier
 def map_alpha_by_col(df, alpha_val_map=None, type_col=None, alpha=0.5):
