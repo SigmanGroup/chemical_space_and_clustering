@@ -43,8 +43,15 @@ import plotly.graph_objects as go
 from rdkit import Chem
 from rdkit.Chem import Draw
 
-### --- interactive plotting functions --- ###
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
+from matplotlib import colors as mcolors
+
+from yellowbrick.cluster import SilhouetteVisualizer
+
+### --- interactive plotting functions --- ###
 #cycle through n color so each cluster is a unique color
 def n_colors(n): #s = 0.65 is color intensity (0 gray, 1 full color), v = 0.95 is brightness (0 black, 1 full color)
     return ['#%02x%02x%02x' % tuple(int(255*c) for c in colorsys.hsv_to_rgb(i/n, 0.65, 0.95))
@@ -95,7 +102,6 @@ def map_marker_symbols(series, n_points=None):
     symbol_map = {val: plotly_marker_symbols[i % len(plotly_marker_symbols)] for i, val in enumerate(unique_vals)}
     return series.map(symbol_map).fillna('circle')
 
-# --- Main scatterplot function ---
 # reference: https://dash.plotly.com/dash-core-components/tooltip
 def int_scatter_dash(df, x_col, y_col, smiles_col=None, id_col=None,molSize=(150,150), 
                      marker_size=30, marker_symbol="circle", marker_color='blue',
@@ -252,7 +258,7 @@ def int_scatter_dash(df, x_col, y_col, smiles_col=None, id_col=None,molSize=(150
 def dim_reduction_umap(features,x_coordinates_label, y_coordinates_label,
                        id_column, smiles_column, excel_filename,
                        n_neighbors, min_dist, n_components, distance_metric,
-                       random_state,excel_export=False, ):
+                       random_state, excel_export=False):
     
     reducer = umap.UMAP(n_neighbors=n_neighbors,
                         min_dist=min_dist,
@@ -301,15 +307,18 @@ def dim_reduction_pca(features, n_components, id_column, smiles_column,
     return pca_df, feature_contributions
 
 def dim_reduction_tsne (features, x_coordinates_label, y_coordinates_label,
+                        id_column, smiles_column, excel_filename,
                         n_components, perplexity, learning_rate,
-                        init, random_state, distance_metric
-                        export_excel=False, excel_filename=None):
+                        init, random_state, distance_metric,
+                        export_excel=False):
+    
     tsne = TSNE (n_components=n_components, perplexity=perplexity,
                  learning_rate=learning_rate, init=init,
                  random_state=random_state, metric=distance_metric)
+    
     tsne_results = tsne.fit_transform(features)
     tsne_df = pd.DataFrame(tsne_results, columns=[x_coordinates_label, y_coordinates_label])
-    tsne_df['id'], tsne_df['smiles'] = ID, smiles
+    tsne_df['id'], tsne_df['smiles'] = id_column, smiles_column
 
     if export_excel:
         tsne_df.to_excel(excel_filename, index=False)
@@ -317,128 +326,167 @@ def dim_reduction_tsne (features, x_coordinates_label, y_coordinates_label,
 
     return tsne_df
 
-def feat_v_feat (features, feature_x, feature_y, feature_z):
+def feat_v_feat (features, id_column, smiles_column, 
+                 feature_x, feature_y, feature_z):
 
     chem_space_df = features[[feature_x, feature_y] + ([feature_z] if feature_z else [])].copy()
-    chem_space_df['id'], chem_space_df['smiles'] =  ID, smiles
+    chem_space_df['id'], chem_space_df['smiles'] =  id_column, smiles_column
+
     return chem_space_df
 
 
+### --- Cleaner + generalized plotting functions, not interactive --- ###
+matplotlib_markers = ['o', 's', 'D', 'X', 'P', '^', 'v', '<', '>', '*', 'h', 'H', '8']
 
-### --- Cleaner + generalized plotting functions --- ###
-# def plot_chemical_space_2D (df, x, y, fig_size=(6,6), xlabel=None, ylabel=None,
-#                         marker_size=20, marker_color='blue', alpha=0.7, marker='o',
-#                         marker_edge_color='black', marker_edge_width=1,
-#                         title=None, save_plot=False, plot_filename=None,
-#                         axis_label_fontsize=12, title_fontsize=14,
-#                         subgroup=True, subgroup_column=None, subgroup_palette='plasma',
-#                         categorical= False, category_dict=None, categorical_palette=None,
-#                         heatmap=False, response_column = None, heatmap_palette='plasma',
-#                         size_col = None, min_size=30, max_size=100,
-#                         alpha_col=None, min_alpha=0.3, max_alpha=1.0,
-#                         marker_col=None, plot_order=None):
-#     fig, ax = plt.subplots(figsize=fig_size)
-#     if not subgroup and not heatmap:
-#         ax.scatter(df[x], df[y], s=marker_size, marker=marker, c=marker_color, alpha=alpha,
-#                    edgecolor=marker_edge_color, linewidth=marker_edge_width)
-#     elif subgroup and not heatmap:
-#         if subgroup_column is None:
-#             raise ValueError("subgroup_column must be provided when subgroup is True")
-#         if categorical:
-#             if category_dict is None:
-#                 if categorical_palette is None:
-#                     color_list = n_colors(len(df[subgroup_column].dropna().unique()))
-#                 else:
-#                     colors = cm.get_cmap(categorical_palette, len(df[subgroup_column].dropna().unique()))
-#                     color_list = [colors(i) for i in range(len(df[subgroup_column].dropna().unique()))]
-#                 category_dict = dict(zip(df[subgroup_column].dropna().unique(), color_list))
-#             for group, color in category_dict.items():
-#                 subgroup_df = df[df[subgroup_column] == group]
-#                 ax.scatter(subgroup_df[x], subgroup_df[y],
-#                             s=scale_size(subgroup_df[size_col] if size_col else None, min_size, max_size, n_points=len(subgroup_df)),
-#                             c=color,
-#                             alpha=scale_alpha(subgroup_df[alpha_col] if alpha_col else None, min_alpha, max_alpha, n_points=len(subgroup_df)),
-#                             edgecolor=marker_edge_color,
-#                             linewidth=marker_edge_width,
-#                             marker=marker,
-#                             label=str(group))
-#     elif heatmap and not subgroup:
-#         if response_column is None:
-#             raise ValueError("response_column must be provided when heatmap is True")
-#         else:
-#             norm = plt.Normalize(df[response_column].min(), df[response_column].max())
-#             scalarmap = plt.cm.ScalarMappable(cmap=heatmap_palette, norm=norm)
-#             ax.scatter(df[x], df[y], s=marker_size, c=df[response_column],
-#                        cmap=heatmap_palette, edgecolor=marker_edge_color,
-#                        marker=marker, linewidth=marker_edge_width,
-#                        alpha=alpha)
-#             fig.colorbar(scalarmap, ax=ax, label=response_column)
+def map_markers_matplotlib(series, n_points=None):
+    if series is None:
+        if n_points is None:
+            raise ValueError("Must provide n_points if series is None")
+        return ['circle']*n_points
+    unique_vals = series.dropna().unique()
+    symbol_map = {val: matplotlib_markers[i % len(matplotlib_markers)] for i, val in enumerate(unique_vals)}
+    return series.map(symbol_map).fillna('circle')
 
-# making plots prettier
-def map_alpha_by_col(df, alpha_val_map=None, type_col=None, alpha=0.5):
-    if type_col is None:
-        type_col_avail = [col for col in ['type', 'class', 'label', 'labels'] if col in df.columns]
-        if len(type_col_avail) > 1:
-            raise ValueError("Multiple options for type column found, specify column using type_col = 'column_name'")
-        elif len(type_col_avail) == 1:
-            type_col = type_col_avail[0]
-        elif type_col == None:
-            raise ValueError("No type column found, specify column using type_col = 'column_name'")
 
-    if alpha_val_map is None:
-        alpha_val_map = {}
+def plot_chemical_space(df, x, y, z=None, input_df=None, fig_size=(6,6), xlabel=None, ylabel=None, zlabel=None,
+                        marker_size=20, marker_color='#7B1B79', alpha=0.7, marker='o',
+                        marker_edge_color='black', marker_edge_width=1,
+                        title=None, save_plot=False, plot_filename=None,
+                        fontsize=12, title_fontsize=14,
+                        subgroup=True, subgroup_column_name=None, subgroup_palette=None, 
+                        category_dict=None, heatmap=False, response_column_name=None, heatmap_palette='plasma',
+                        size_col_name=None, min_size=30, max_size=100,
+                        alpha_col_name=None, min_alpha=0.3, max_alpha=1.0,
+                        marker_col=None, marker_dict=None, plot_order=None,
+                        threedim=False):  
     
-    df['alpha'] = df[type_col].map(alpha_val_map).fillna(alpha)
-    return df
-
-def map_color_by_col(df, color_map=None, type_col=None, color='hotpink'):
-    if type_col is None:
-        type_col_avail = [col for col in ['type', 'class', 'label', 'labels'] if col in df.columns]
-        if len(type_col_avail) > 1:
-            raise ValueError("Multiple options for type column found, specify column using type_col = 'column_name'")
-        elif len(type_col_avail) == 1:
-            type_col = type_col_avail[0]
-        elif type_col == None:
-            raise ValueError("No type column found, specify column using type_col = 'column_name'")
-
-    if color_map is None:
-        color_map = {}
+    # set up data for size, alpha, and marker type if specified
+    if size_col_name and size_col_name not in df.columns:
+        df[size_col_name] = input_df[size_col_name]
+    if alpha_col_name and alpha_col_name not in df.columns:
+        df[alpha_col_name] = input_df[alpha_col_name]
+    if marker_col and marker_col not in df.columns:
+        df[marker_col] = input_df[marker_col]
     
-    df['color'] = df[type_col].map(color_map).fillna(color)
-    return df
+    marker_sizes = scale_size(df[size_col_name] if size_col_name else None, min_size, max_size, n_points=len(df))
+    alpha_values = scale_alpha(df[alpha_col_name] if alpha_col_name else None, min_alpha, max_alpha, n_points=len(df))
     
-def map_size_by_col(df, size_map=None, type_col=None, size=100):
-    if type_col is None:
-        type_col_avail = [col for col in ['type', 'class', 'label', 'labels'] if col in df.columns]
-        if len(type_col_avail) > 1:
-            raise ValueError("Multiple options for type column found, specify column using type_col = 'column_name'")
-        elif len(type_col_avail) == 1:
-            type_col = type_col_avail[0]
-        elif type_col == None:
-            raise ValueError("No type column found, specify column using type_col = 'column_name'")
+    if marker_col and not marker_dict:
+        markers = map_markers_matplotlib(df[marker_col] if marker_col else None, n_points=len(df))
+    elif marker_col and marker_dict:
+        markers = df[marker_col].map(marker_dict).fillna('o')
 
-    if size_map is None:
-        size_map = {}
-    
-    df['size'] = df[type_col].map(size_map).fillna(size)
-    return df
-    
-def map_marker_by_col(df, marker_map=None, type_col=None, marker='o'):
-    if type_col is None:
-        type_col_avail = [col for col in ['type', 'class', 'label', 'labels'] if col in df.columns]
-        if len(type_col_avail) > 1:
-            raise ValueError("Multiple options for type column found, specify column using type_col = 'column_name'")
-        elif len(type_col_avail) == 1:
-            type_col = type_col_avail[0]
-        elif type_col == None:
-            raise ValueError("No type column found, specify column using type_col = 'column_name'")
+    fig = plt.figure(figsize=fig_size)
+    if threedim:
+        ax = fig.add_subplot(111, projection='3d')
+    else:
+        ax = fig.add_subplot(111)
 
-    if marker_map is None:
-        marker_map = {}
+    # plot simple chemical space
+    if not subgroup and not heatmap:
+        if threedim:
+            ax.scatter(df[x], df[y], df[z], s=marker_size, marker=marker, c=marker_color, alpha=alpha,
+                       edgecolor=marker_edge_color, linewidth=marker_edge_width)
+        else:
+            ax.scatter(df[x], df[y], s=marker_size, marker=marker, c=marker_color, alpha=alpha,
+                       edgecolor=marker_edge_color, linewidth=marker_edge_width)
     
-    df['marker'] = df[type_col].map(marker_map).fillna(marker)
-    return df
+    # plot chemical space with subgroups
+    elif subgroup and not heatmap:
+        if subgroup_column_name is None:
+            raise ValueError("subgroup_column_name must be provided when subgroup is True")
+        subgroup_column = input_df[subgroup_column_name]
+        df[subgroup_column_name] = subgroup_column
+        # use a matplotlib palette for subgroups
+        if category_dict is None:
+            if subgroup_palette is None:
+                colors = cm.get_cmap('tab20c', len(df[subgroup_column_name].dropna().unique()))
+                color_list = [colors(i) for i in range(len(df[subgroup_column_name].dropna().unique()))]
+            else:
+                colors = cm.get_cmap(subgroup_palette, len(df[subgroup_column_name].dropna().unique()))
+                color_list = [colors(i) for i in range(len(df[subgroup_column_name].dropna().unique()))]
+            category_dict = dict(zip(df[subgroup_column_name].dropna().unique(), color_list))
+        # or using a dictionary put in by user
+        for group, color in category_dict.items():
+            subgroup_df = df[df[subgroup_column_name] == group]
+            if threedim:
+                ax.scatter(subgroup_df[x], subgroup_df[y], subgroup_df[z],
+                           s=marker_sizes[subgroup_df.index] if size_col_name else marker_size,
+                           c=color,
+                           alpha=alpha_values[subgroup_df.index] if alpha_col_name else alpha,
+                           edgecolor=marker_edge_color,
+                           linewidth=marker_edge_width,
+                           marker=markers[subgroup_df.index] if marker_col else marker,
+                           label=str(group))
+            else:
+                ax.scatter(subgroup_df[x], subgroup_df[y],
+                           s=marker_sizes[subgroup_df.index] if size_col_name else marker_size,
+                           c=color,
+                           alpha=alpha_values[subgroup_df.index] if alpha_col_name else alpha,
+                           edgecolor=marker_edge_color,
+                           linewidth=marker_edge_width,
+                           marker=markers[subgroup_df.index] if marker_col else marker,
+                           label=str(group))
+    
+    #plot heatmap of chemical space 
+    elif heatmap and not subgroup:
+        if response_column_name is None:
+            raise ValueError("response_column_name must be provided when heatmap is True")
+        elif response_column_name not in df.columns:
+            response_column = input_df[response_column_name]
+            df[response_column_name] = response_column
+        norm = plt.Normalize(df[response_column_name].min(), df[response_column_name].max())
+        scalarmap = plt.cm.ScalarMappable(cmap=heatmap_palette, norm=norm)
+        if threedim:
+            ax.scatter(df[x], df[y], df[z],
+                       s=marker_sizes if size_col_name else marker_size,
+                       c=df[response_column_name],
+                       cmap=heatmap_palette,
+                       edgecolor=marker_edge_color,
+                       marker=marker,
+                       linewidth=marker_edge_width,
+                       alpha=alpha_values if alpha_col_name else alpha)
+        else:
+            ax.scatter(df[x], df[y],
+                       s=marker_sizes if size_col_name else marker_size,
+                       c=df[response_column_name],
+                       cmap=heatmap_palette,
+                       edgecolor=marker_edge_color,
+                       marker=marker,
+                       linewidth=marker_edge_width,
+                       alpha=alpha_values if alpha_col_name else alpha)
+    
+   # general plotting formatting
+    ax.set_xlabel(xlabel if xlabel else x, fontsize=fontsize)
+    ax.set_ylabel(ylabel if ylabel else y, fontsize=fontsize)
+    if threedim:
+        ax.set_zlabel(zlabel if zlabel else z, fontsize=fontsize)
+    
+    ax.tick_params(axis='x', labelsize=fontsize)
+    ax.tick_params(axis='y', labelsize=fontsize)
+    if not threedim:
+        ax.spines[['top', 'right']].set_visible(False)
+    ax.grid(False)
 
+    if title:
+        ax.set_title(title, fontsize=title_fontsize)
+    
+    # make less white space
+    if not threedim:
+        # make less white space 
+        fig.subplots_adjust(
+        left=0.20,   # space between left edge of figure and first subplot
+        right=.99,  # space between right edge of figure and last subplot
+        bottom=0.17, # space between bottom edge and subplots
+        top=0.98,    # space between top edge and subplots
+        wspace=0.25, # horizontal space between subplots
+        hspace=0.25)  # vertical space between subplots (not used here since only 1 row)
+
+    if save_plot and plot_filename:
+        plt.savefig(plot_filename, dpi=300)
+        print(f"Plot saved as {plot_filename}")
+
+    return fig, ax
 
 def get_hopkins_stat(features):
   d = features.shape[1]
@@ -463,341 +511,14 @@ def get_hopkins_stat(features):
  
   return hopkins_stat
   
-  
-def plot_umap(features, ID, image, smiles, n_neighbors, min_dist, distance_metric, random_state, 
-              font_size=16, type_column=None, response_column=None, alpha=0.7, color='#7B1B79', marker='o', size=100,  
-              alpha_value_mapping=None, color_mapping=None, marker_mapping=None, size_mapping=None, plot_order=None,
-              export_excel=False, excel_filename="umap_coordinates_df.xlsx",
-              save_plot=False, plot_filename="umap_plot.png", heatmap=False, palette='plasma'):
-
-    reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=min_dist, n_components=2,
-                        metric=distance_metric, random_state=random_state)
-    
-    umap_results = reducer.fit_transform(features)
-    umap_df = pd.DataFrame(umap_results, columns=['UMAP1', 'UMAP2'])
-    umap_df['name'], umap_df['image'], umap_df['smiles'] = ID, image, smiles
-
-    plt.figure(figsize=(6, 6))
-
-    if heatmap:
-        umap_df['response'] = response_column
-        norm = plt.Normalize(umap_df['response'].min(), umap_df['response'].max())
-        sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
-        plt.scatter(umap_df['UMAP1'], umap_df['UMAP2'], alpha=alpha, c=umap_df['response'], cmap=palette, marker=marker, s=size)
-        plt.colorbar(sm, label='Response')
-
-    elif type_column is not None:
-        umap_df['type'] = type_column
-        umap_df['type'] = umap_df['type'].astype(str)
-        unique_types = sorted(umap_df['type'].unique())
-
-        cmap = cm.get_cmap('tab20', len(unique_types))
-        default_colors = [cmap(i) for i in range(len(unique_types))]
-        default_markers = itertools.cycle(['s', 'o', 'D', '^', 'v', '*', 'X', 'P'])
-        default_sizes = itertools.cycle([50, 80, 100, 120, 140, 160])
-
-        color_mapping = color_mapping or {t: default_colors[i] for i, t in enumerate(unique_types)}
-        marker_mapping = marker_mapping or {t: next(default_markers) for t in unique_types}
-        size_mapping = size_mapping or {t: next(default_sizes) for t in unique_types}
-        alpha_value_mapping = alpha_value_mapping or {t: 0.8 for t in unique_types}
-
-        for t in unique_types:
-            t = str(t) #corrects error if column contains true/false and is read as a boolean 
-            umap_df['type'] = umap_df['type'].astype(str)
-            
-            subset = umap_df[umap_df['type'] == t]
-            plt.scatter(subset['UMAP1'], subset['UMAP2'], 
-                        alpha=alpha_value_mapping[t], color=color_mapping[t], 
-                        marker=marker_mapping[t], s=size_mapping[t], label=t)
-        
-        plt.legend(title='Type', fontsize=12)
-
-    else:
-        plt.scatter(umap_df['UMAP1'], umap_df['UMAP2'], alpha=alpha, color=color, marker=marker, s=size)
-
-    plt.xlabel('UMAP1', fontsize=font_size)
-    plt.ylabel('UMAP2', fontsize=font_size)
-    plt.xticks(fontsize=font_size)
-    plt.yticks(fontsize=font_size)
-    
-    plt.gca().spines[['top', 'right']].set_visible(False)
-    plt.grid(False)
-
-    if save_plot:
-        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
-        print(f"Plot saved as {plot_filename}")
-
-    if export_excel:
-        umap_df.to_excel(excel_filename, index=False)
-        print(f"UMAP data saved to {excel_filename}")
-
-    plt.show()
-    return umap_df
-
-def plot_tsne(features, ID, image, smiles, perplexity, early_exaggeration,learning_rate, distance_metric, random_state, init='random',
-              font_size=16, type_column=None, response_column=None, alpha=0.7, color='#7B1B79', marker='o', size=100,  
-              alpha_value_mapping=None, color_mapping=None, marker_mapping=None, size_mapping=None, plot_order=None,
-            export_excel=False, excel_filename="tsne_coordinates_df.xlsx",
-            save_plot=False, plot_filename="tsne_plot.png", heatmap=False, palette='plasma'):
-              
-    tsne = TSNE(n_components=2, perplexity=perplexity, learning_rate=learning_rate, metric=distance_metric, 
-            init=init, random_state=random_state, )
-    tsne_results = tsne.fit_transform(features)
-    tsne_df = pd.DataFrame(tsne_results, columns=['TSNE1', 'TSNE2'])
-    tsne_df['name'], tsne_df['image'], tsne_df['smiles'] = ID, image, smiles
-    plt.figure(figsize=(6, 6))
-
-    if heatmap:
-        tsne_df['response'] = response_column
-        norm = plt.Normalize(tsne_df['response'].min(), tsne_df['response'].max())
-        sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
-        plt.scatter(tsne_df['TSNE1'], tsne_df['TSNE2'], alpha=alpha, c=tsne_df['response'], cmap=palette, marker=marker, s=size)
-        plt.colorbar(sm, label='Response')
-
-    elif type_column is not None:
-        tsne_df['type'] = type_column
-        unique_types = sorted(tsne_df['type'].unique())
-
-        cmap = cm.get_cmap(palette, len(unique_types))
-        default_colors = [cmap(i) for i in range(len(unique_types))]
-        default_markers = itertools.cycle(['s', 'o', 'D', '^', 'v', '*', 'X', 'P'])
-        default_sizes = itertools.cycle([50, 80, 100, 120, 140, 160])
-
-        color_mapping = color_mapping or {t: default_colors[i] for i, t in enumerate(unique_types)}
-        marker_mapping = marker_mapping or {t: next(default_markers) for t in unique_types}
-        size_mapping = size_mapping or {t: next(default_sizes) for t in unique_types}
-        alpha_value_mapping = alpha_value_mapping or {t: 0.8 for t in unique_types}
-
-        for t in unique_types:
-            subset = tsne_df[tsne_df['type'] == t]
-            plt.scatter(subset['TSNE1'], subset['TSNE2'], 
-                        alpha=alpha_value_mapping[t], color=color_mapping[t], 
-                        marker=marker_mapping[t], s=size_mapping[t], label=t)
-        
-        plt.legend(title='Type', fontsize=12)
-
-    else:
-        plt.scatter(tsne_df['TSNE1'], tsne_df['TSNE2'], alpha=alpha, color=color, marker=marker, s=size)
-
-    plt.xlabel('TSNE1', fontsize=font_size)
-    plt.ylabel('TSNE2', fontsize=font_size)
-    plt.xticks(fontsize=font_size)
-    plt.yticks(fontsize=font_size)
-    
-    plt.gca().spines[['top', 'right']].set_visible(False)
-    plt.grid(False)
-
-    if save_plot:
-        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
-        print(f"Plot saved as {plot_filename}")
-
-    if export_excel:
-        tsne_df.to_excel(excel_filename, index=False)
-        print(f"TSNE data saved to {excel_filename}")
-
-    plt.show()
-    return tsne_df
-    
-    
-def plot_pca(feature_df, features, ID, image, smiles, n_components=2, alpha=0.7, color='#7B1B79', marker='o', size=100,  
-             alpha_value_mapping=None, color_mapping=None, marker_mapping=None, size_mapping=None, plot_order=None,
-             pc_x='PC1', pc_y='PC2', pc_z=None, font_size=16, type_column=None, response_column=None,
-             export_excel=False, export_feature_excel=False, excel_filename="pca_coordinates_df.xlsx",
-             save_plot=False, plot_filename="pca_plot.png", feature_filename = "pca_feature_loading.xlsx", heatmap=False, palette='plasma'):
-    
-    pca = PCA(n_components=n_components)
-    pca_results = pca.fit_transform(features)
-    pca_score = pca.explained_variance_ratio_
-    
-    print('Total variance explained by PCs:', round(np.sum(pca_score * 100), 1), '%\n')
-    print("Percentage of explained variance per principal component:")
-    for i, j in enumerate(pca_score):
-        print(f"PC{i+1}   {j * 100:.1f}%")
-    
-    pca_df = pd.DataFrame(pca_results, columns=[f'PC{i+1}' for i in range(n_components)])
-    pca_df['name'], pca_df['image'], pca_df['smiles'] = ID, image, smiles
-    
-    fig = plt.figure(figsize=(6, 6))
-    
-    if pc_z is None:
-        ax = plt.gca()  # 2D plot
-        if heatmap:
-            pca_df['response'] = response_column
-            norm = plt.Normalize(pca_df['response'].min(), pca_df['response'].max())
-            sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
-            plt.scatter(pca_df[pc_x], pca_df[pc_y], alpha=alpha, c=pca_df['response'], cmap=palette, marker=marker, s=size)
-            plt.colorbar(sm, label='Response')
-        elif type_column is not None:
-            pca_df['type'] = type_column
-            unique_types = sorted(pca_df['type'].unique())
-            cmap = cm.get_cmap('tab20', len(unique_types))
-            default_colors = [cmap(i) for i in range(len(unique_types))]
-            default_markers = itertools.cycle(['s', 'o', 'D', '^', 'v', '*', 'X', 'P'])
-            default_sizes = itertools.cycle([50, 80, 100, 120, 140, 160])
-            color_mapping = color_mapping or {t: default_colors[i] for i, t in enumerate(unique_types)}
-            marker_mapping = marker_mapping or {t: next(default_markers) for t in unique_types}
-            size_mapping = size_mapping or {t: next(default_sizes) for t in unique_types}
-            alpha_value_mapping = alpha_value_mapping or {t: 0.8 for t in unique_types}
-            for t in unique_types:
-                subset = pca_df[pca_df['type'] == t]
-                plt.scatter(subset[pc_x], subset[pc_y], 
-                            alpha=alpha_value_mapping[t], color=color_mapping[t], 
-                            marker=marker_mapping[t], s=size_mapping[t], label=t)
-            plt.legend(title='Type', fontsize=12)
-        else:
-            plt.scatter(pca_df[pc_x], pca_df[pc_y], alpha=alpha, color=color, marker=marker, s=size)
-        plt.xlabel(pc_x, fontsize=font_size)
-        plt.ylabel(pc_y, fontsize=font_size)
-    
-    else:
-        ax = fig.add_subplot(111, projection='3d')  # 3D plot
-        if type_column is not None:
-            for t in unique_types:
-                subset = pca_df[pca_df['type'] == t]
-                ax.scatter(subset[pc_x], subset[pc_y], subset[pc_z], 
-                           alpha=alpha_value_mapping[t], color=color_mapping[t], 
-                           marker=marker_mapping[t], s=size_mapping[t], label=t)
-            plt.legend(title='Type', fontsize=12)
-        else:
-            ax.scatter(pca_df[pc_x], pca_df[pc_y], pca_df[pc_z], alpha=alpha, color=color, marker=marker, s=size)
-        ax.set_xlabel(pc_x, fontsize=font_size)
-        ax.set_ylabel(pc_y, fontsize=font_size)
-        ax.set_zlabel(pc_z, fontsize=font_size)
-    
-    ax.tick_params(labelsize=font_size)
-    plt.xticks(fontsize=font_size)
-    plt.yticks(fontsize=font_size)
-    plt.gca().spines[['top', 'right']].set_visible(False)
-    plt.grid(False)
-    
-    feature_names = feature_df.columns if isinstance(feature_df, pd.DataFrame) else [f'Feature {i+1}' for i in range(feature_df.shape[1])]
-    feature_contributions = pd.DataFrame(pca.components_.T, 
-                                         index=feature_names, 
-                                         columns=[f'PC{i+1}' for i in range(n_components)])
-                                         
-
-    if export_feature_excel:
-        feature_contributions.to_excel(feature_filename)
-        print(f"Feature contributions saved to {feature_filename}")
-    
-    if save_plot:
-        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
-        print(f"Plot saved as {plot_filename}")
-    
-    if export_excel:
-        pca_df.to_excel(excel_filename, index=False)
-        print(f"PCA data saved to {excel_filename}")
-    
-    plt.show()
-    return pca_df
-
-def plot_feature_v_feature(features, ID, image, smiles, feature_x, feature_y, 
-                           feature_z=None, font_size=16, type_column=None, response_column=None,
-                           alpha=0.7, color='#7B1B79', marker='o', size=100,  
-                           alpha_value_mapping=None, color_mapping=None, 
-                           marker_mapping=None, size_mapping=None, plot_order=None,
-                           export_excel=False, excel_filename="feature1_vs_feature2_coordinates_df.xlsx",
-                           save_plot=False, plot_filename="feature1_vs_feature2_plot.png",
-                           heatmap=False, palette='plasma'):
-    
-    chem_space_df = features[[feature_x, feature_y] + ([feature_z] if feature_z else [])].copy()
-    chem_space_df['name'], chem_space_df['image'], chem_space_df['smiles'] = ID, image, smiles
-    fig = plt.figure(figsize=(6, 6))
-
-    if feature_z is None:
-        ax = plt.gca()
-        if heatmap:
-            chem_space_df['response'] = response_column
-            norm = plt.Normalize(chem_space_df['response'].min(), chem_space_df['response'].max())
-            sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
-            plt.scatter(chem_space_df[feature_x], chem_space_df[feature_y], alpha=alpha, 
-                        c=chem_space_df['response'], cmap=palette, marker=marker, s=size)
-            plt.colorbar(sm, label='Response')
-
-        elif type_column is not None:
-            chem_space_df['type'] = type_column
-            unique_types = sorted(chem_space_df['type'].unique())
-
-            cmap = cm.get_cmap('tab20', len(unique_types))
-            color_mapping = {t: cmap(i) for i, t in enumerate(unique_types)}
-            marker_mapping = {t: m for t, m in zip(unique_types, itertools.cycle(['s', 'o', 'D', '^', 'v', '*', 'X', 'P']))}
-            size_mapping = {t: s for t, s in zip(unique_types, itertools.cycle([50, 80, 100, 120, 140, 160]))}
-            alpha_value_mapping = {t: 0.8 for t in unique_types}
-
-            for t in unique_types:
-                subset = chem_space_df[chem_space_df['type'] == t]
-                plt.scatter(subset[feature_x], subset[feature_y], 
-                            alpha=alpha_value_mapping[t], color=color_mapping[t], 
-                            marker=marker_mapping[t], s=size_mapping[t], label=t)
-            
-            plt.legend(title='Type', fontsize=12)
-
-        else:
-            plt.scatter(chem_space_df[feature_x], chem_space_df[feature_y], alpha=alpha, 
-                        color=color, marker=marker, s=size)
-        
-        plt.xlabel(feature_x, fontsize=font_size)
-        plt.ylabel(feature_y, fontsize=font_size)
-    else:
-        ax = fig.add_subplot(111, projection='3d')
-        if heatmap:
-            chem_space_df['response'] = response_column
-            norm = plt.Normalize(chem_space_df['response'].min(), chem_space_df['response'].max())
-            sm = plt.cm.ScalarMappable(cmap=palette, norm=norm)
-            ax.scatter(chem_space_df[feature_x], chem_space_df[feature_y], chem_space_df[feature_z], 
-                       alpha=alpha, c=chem_space_df['response'], cmap=palette, marker=marker, s=size)
-            fig.colorbar(sm, ax=ax, label='Response')
-
-        elif type_column is not None:
-            chem_space_df['type'] = type_column
-            unique_types = sorted(chem_space_df['type'].unique())
-
-            cmap = cm.get_cmap('tab20', len(unique_types))
-            color_mapping = {t: cmap(i) for i, t in enumerate(unique_types)}
-            marker_mapping = {t: m for t, m in zip(unique_types, itertools.cycle(['s', 'o', 'D', '^', 'v', '*', 'X', 'P']))}
-            size_mapping = {t: s for t, s in zip(unique_types, itertools.cycle([50, 80, 100, 120, 140, 160]))}
-            alpha_value_mapping = {t: 0.8 for t in unique_types}
-
-            for t in unique_types:
-                subset = chem_space_df[chem_space_df['type'] == t]
-                ax.scatter(subset[feature_x], subset[feature_y], subset[feature_z], 
-                           alpha=alpha_value_mapping[t], color=color_mapping[t], 
-                           marker=marker_mapping[t], s=size_mapping[t], label=t)
-            
-            plt.legend(title='Type', fontsize=12)
-
-        else:
-            ax.scatter(chem_space_df[feature_x], chem_space_df[feature_y], chem_space_df[feature_z], 
-                       alpha=alpha, color=color, marker=marker, s=size)
-
-        ax.set_xlabel(feature_x, fontsize=font_size)
-        ax.set_ylabel(feature_y, fontsize=font_size)
-        ax.set_zlabel(feature_z, fontsize=font_size)
-
-    ax.tick_params(labelsize=font_size)
-    plt.xticks(fontsize=font_size)
-    plt.yticks(fontsize=font_size)
-    plt.gca().spines[['top', 'right']].set_visible(False)
-    plt.grid(False)
-
-    if save_plot:
-        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
-        print(f"Plot saved as {plot_filename}")
-
-    if export_excel:
-        chem_space_df.to_excel(excel_filename, index=False)
-        print(f"Feature data saved to {excel_filename}")
-
-    plt.show()
-    return chem_space_df
-
+#### ---- clustering evaluation functions ---- ####
 def silhouette_scores(data, X_coordinate_column, Y_coordinate_column,
                       min_clusters, max_clusters, clustering_function, random_state):
     scores = []
     clusters_range = range(min_clusters, max_clusters + 1)
 
     for n_clusters in clusters_range:
-        model, _ = clustering_function(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters, plot=False)  
+        model, _ = clustering_function(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters)  
         coordinates = data[[X_coordinate_column, Y_coordinate_column]]
         clusters = model.predict(coordinates)
 
@@ -821,24 +542,6 @@ def silhouette_scores(data, X_coordinate_column, Y_coordinate_column,
     plt.ylabel("Silhouette Score")
     plt.title("Silhouette Method")
     plt.show()
-    
-    
-def kmeans_clustering(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters, plot=True):
-    coordinates = data[[X_coordinate_column, Y_coordinate_column]]
-    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
-    clusters = kmeans.fit_predict(coordinates)  # Get cluster assignments
-    data['cluster'] = clusters  # Store cluster labels in DataFrame
-    
-    if plot:
-        plt.figure(figsize=(6, 6))
-        sns.scatterplot(x=X_coordinate_column, y=Y_coordinate_column, hue='cluster', 
-                        data=data, palette='viridis', s=100)
-        plt.xlabel(X_coordinate_column)
-        plt.ylabel(Y_coordinate_column)
-        plt.legend(title='Cluster')
-        plt.show()
-
-    return kmeans, data  # Return both the model and updated DataFrame
 
 
 def aic_bic_inertia_scores(data, X_coordinate_column, Y_coordinate_column,
@@ -851,7 +554,7 @@ def aic_bic_inertia_scores(data, X_coordinate_column, Y_coordinate_column,
     coordinates = data[[X_coordinate_column, Y_coordinate_column]]
 
     for n in n_clusters:
-        model, _ = clustering_function(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters=n, plot=False)
+        model, _ = clustering_function(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters=n)
         if hasattr(model, 'bic'):
             bic_scores.append(model.bic(coordinates)) 
         else:
@@ -881,7 +584,133 @@ def aic_bic_inertia_scores(data, X_coordinate_column, Y_coordinate_column,
     plt.show()
     return {'aic': aic_scores, 'bic': bic_scores, 'inertia': inertia_scores}
 
-def gmm_clustering(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters, covariance_type='full', plot=True):
+    
+#### ---- clustering functions ---- ####
+def cluster_plots( df, x, y, cluster_column, xlabel, ylabel,
+                    cluster_color_map='plasma', marker_size=50, marker_color='black', alpha=0.7,
+                    marker='o', marker_edge_color='black', title=None, save_plot=False, plot_filename=None,
+                    fontsize=12, title_fontsize=14, subgroup=False, subgroup_column_name=None,
+                    subgroup_palette='tab20', size_col_name=None, fig_size=(6,6),
+                    subgroup_plot_dict=None, subgroup_marker='s'):
+    
+    fig, ax = plt.subplots(figsize=fig_size)
+    clusters = sorted(df[cluster_column].unique())
+
+    if not subgroup:
+        if cluster_color_map is None:
+            cluster_color_map = plt.get_cmap('plasma')
+        elif isinstance(cluster_color_map, str):
+            cluster_color_map = plt.get_cmap(cluster_color_map)
+
+        norm = mcolors.Normalize(vmin=min(clusters), vmax=max(clusters))
+
+        ax.scatter(df[x], df[y],
+                    s=marker_size, marker=marker,
+                    c=df[cluster_column],
+                    cmap=cluster_color_map, alpha=alpha,
+                    edgecolor=marker_edge_color, linewidth=1)
+        
+        handles = []
+        for cluster in clusters:
+            color = cluster_color_map(norm(cluster))
+            handles.append(
+                plt.Line2D([], [], color=color, marker=marker,
+                        linestyle='', markersize=8, label=f'cluster {cluster}')
+            )
+
+        ax.legend(handles=handles, title="clusters", fontsize=fontsize, title_fontsize=fontsize,
+                  bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+
+    #if you want clusters + your subgroup plotted together
+    else:
+        if subgroup_column_name is None:
+            raise ValueError("subgroup_column_name must be provided when subgroup is True")
+        if subgroup_column_name not in df.columns:
+            subgroup_column = df[subgroup_column_name]
+            df[subgroup_column_name] = subgroup_column
+
+        if cluster_color_map is None:
+            cluster_color_map = plt.get_cmap('plasma')
+        elif isinstance(cluster_color_map, str):
+            cluster_color_map = plt.get_cmap(cluster_color_map)
+
+        plt.scatter(df[x], df[y],
+                    s=marker_size, marker=marker,
+                    c=df[cluster_column], cmap=cluster_color_map, alpha=alpha,
+                    edgecolor=marker_edge_color, linewidth=1, zorder=1)
+        if subgroup_palette is None:
+            subgroup_palette = plt.get_cmap('tab20')
+        elif isinstance(subgroup_palette, str):
+            subgroup_palette = plt.get_cmap(subgroup_palette)
+        subgroup_labels = [label for label, action in subgroup_plot_dict.items() if action == 'plot']
+        for i, type_label in enumerate(subgroup_labels):
+            subset = df[df[subgroup_column_name] == type_label]
+            color = subgroup_palette(i % 20)  # cycle through subgroup palette
+            ax.scatter(
+                subset[x], subset[y],
+                s=marker_size , marker=subgroup_marker,
+                c=[color], alpha=1.0,
+                edgecolor=None, linewidth=1,
+                label=str(type_label), zorder=2
+            )
+        handles = []
+
+        # --- Cluster handles ---
+        norm = mcolors.Normalize(vmin=min(clusters), vmax=max(clusters))
+        for cluster in clusters:
+            color = cluster_color_map(norm(cluster))
+            handles.append(
+                plt.Line2D([], [], color=color, marker=marker, linestyle='',
+                        markersize=8, label=f'cluster {cluster}')
+            )
+
+        # --- Subgroup handles ---
+        subgroup_labels = [label for label, action in subgroup_plot_dict.items() if action == 'plot']
+        for i, type_label in enumerate(subgroup_labels):
+            color = subgroup_palette(i % 20)  # cycle through subgroup palette
+            handles.append(
+                plt.Line2D([], [], color=color, marker=subgroup_marker, linestyle='',
+                        markersize=8, label=str(type_label))
+            )
+
+        ax.legend(handles=handles, title="Clusters & Subgroups",
+                fontsize=fontsize, title_fontsize=fontsize,
+                bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+
+    # general plotting formatting
+    ax.set_xlabel(xlabel if xlabel else x, fontsize=fontsize)
+    ax.set_ylabel(ylabel if ylabel else y, fontsize=fontsize)
+    ax.tick_params(axis='x', labelsize=fontsize)
+    ax.tick_params(axis='y', labelsize=fontsize)
+    ax.spines[['top', 'right']].set_visible(False)
+    ax.grid(False)
+
+    if title:
+        ax.set_title(title, fontsize=title_fontsize)
+    
+    # make less white space
+    fig.subplots_adjust(
+    left=0.20,   # space between left edge of figure and first subplot
+    right=.99,  # space between right edge of figure and last subplot
+    bottom=0.17, # space between bottom edge and subplots
+    top=0.98,    # space between top edge and subplots
+    wspace=0.25, # horizontal space between subplots
+    hspace=0.25)  # vertical space between subplots (not used here since only 1 row)
+
+    if save_plot and plot_filename:
+        plt.savefig(plot_filename, dpi=300)
+        print(f"Plot saved as {plot_filename}")
+    return fig, ax
+
+def kmeans_clustering(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters):
+    coordinates = data[[X_coordinate_column, Y_coordinate_column]]
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
+    clusters = kmeans.fit_predict(coordinates)  # Get cluster assignments
+    data['cluster'] = clusters  # Store cluster labels in DataFrame
+
+    return kmeans, data  # Return both the model and updated DataFrame
+
+def gmm_clustering(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters, covariance_type='full'):
     coordinates = data[[X_coordinate_column, Y_coordinate_column]]
     gmm = GaussianMixture(n_components=n_clusters, random_state=random_state, covariance_type=covariance_type)
     gmm.fit(coordinates)
@@ -892,19 +721,10 @@ def gmm_clustering(data, X_coordinate_column, Y_coordinate_column, random_state,
     soft_labels_df = pd.DataFrame(soft_labels, columns=[f'prob_belonging_to_cluster_{i}' for i in range(n_clusters)])
     
     data_w_probability= pd.concat([data, soft_labels_df], axis=1)
-    
-    if plot:
-        plt.figure(figsize=(6, 6))
-        sns.scatterplot(x=X_coordinate_column, y=Y_coordinate_column, hue='cluster', 
-                        data=data, palette='viridis', s=100)
-        plt.xlabel(X_coordinate_column)
-        plt.ylabel(Y_coordinate_column)
-        plt.legend(title='Cluster')
-        plt.show()
 
     return gmm, data_w_probability  # Return both the model and updated DataFrame
 
-def hdbscan_clustering(data, X_coordinate_column, Y_coordinate_column, random_state,min_cluster_size, min_samples, distance_metric, plot=True):
+def hdbscan_clustering(data, X_coordinate_column, Y_coordinate_column, random_state,min_cluster_size, min_samples, distance_metric):
     coordinates = data[[X_coordinate_column, Y_coordinate_column]]
     hdbscan_clustering = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=min_samples, metric=distance_metric)
     hdbscan_clusters = hdbscan_clustering.fit_predict(coordinates)  
@@ -913,18 +733,10 @@ def hdbscan_clustering(data, X_coordinate_column, Y_coordinate_column, random_st
     data['cluster'] = hdbscan_clusters 
     print("Fraction of points clustered:",np.sum(clustered_points) / data.shape[0])
     
-    if plot:
-        plt.figure(figsize=(6, 6))
-        sns.scatterplot(x=X_coordinate_column, y=Y_coordinate_column, hue='cluster', 
-                        data=data, palette='viridis', s=100, alpha=0.7)
-        plt.xlabel(X_coordinate_column)
-        plt.ylabel(Y_coordinate_column)
-        plt.legend(title='Cluster')
-        plt.show()
-
     return hdbscan_clustering, data 
 
-def dbscan_clustering(data, X_coordinate_column, Y_coordinate_column, random_state,  distance_metric, eps=0.5, min_samples=5, plot=True):
+
+def dbscan_clustering(data, X_coordinate_column, Y_coordinate_column, random_state,  distance_metric, eps=0.5, min_samples=5):
     coordinates = data[[X_coordinate_column, Y_coordinate_column]]
     dbscan_clustering = DBSCAN(eps=eps, min_samples=min_samples, metric=distance_metric)
     dbscan_clusters = dbscan_clustering.fit_predict(coordinates)  
@@ -933,32 +745,14 @@ def dbscan_clustering(data, X_coordinate_column, Y_coordinate_column, random_sta
     
     print("Fraction of points clustered:",np.sum(clustered_points) / data.shape[0])
     
-    if plot:
-        plt.figure(figsize=(6, 6))
-        sns.scatterplot(x=X_coordinate_column, y=Y_coordinate_column, hue='cluster', 
-                        data=data, palette='viridis', s=100)
-        plt.xlabel(X_coordinate_column)
-        plt.ylabel(Y_coordinate_column)
-        plt.legend(title='Cluster')
-        plt.show()
-
     return dbscan_clustering, data 
 
 
-def agglomerative_clustering(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters, distance_metric='euclidean', linkage_type='ward', plot=True):
+def agglomerative_clustering(data, X_coordinate_column, Y_coordinate_column, random_state, n_clusters, distance_metric='euclidean', linkage_type='ward'):
     coordinates = data[[X_coordinate_column, Y_coordinate_column]]
     agg_clustering= AgglomerativeClustering(n_clusters=n_clusters, metric=distance_metric, linkage=linkage_type)
     agg_clusters = agg_clustering.fit_predict(coordinates)
     data['cluster'] = agg_clusters
-
-    if plot:
-        plt.figure(figsize=(6, 6))
-        sns.scatterplot(x=X_coordinate_column, y=Y_coordinate_column, hue='cluster', 
-                        data=data, palette='viridis', s=100)
-        plt.xlabel(X_coordinate_column)
-        plt.ylabel(Y_coordinate_column)
-        plt.legend(title='Cluster')
-        plt.show()
 
     return agg_clustering, data
 
@@ -982,21 +776,11 @@ def elbow_method(data, X_coordinate_column, Y_coordinate_column, min_clusters, m
     
     
 def BIRCH_clustering(data, X_coordinate_column, Y_coordinate_column, random_state, 
-                     n_clusters, threshold, branching_factor, plot=True):
+                     n_clusters, threshold, branching_factor):
     coordinates = data[[X_coordinate_column, Y_coordinate_column]]
     birch_clustering= Birch(n_clusters=n_clusters, threshold=threshold, branching_factor=branching_factor )
     birch_clusters = birch_clustering.fit_predict(coordinates)
     data['cluster'] = birch_clusters
 
-    if plot:
-        plt.figure(figsize=(6, 6))
-        sns.scatterplot(x=X_coordinate_column, y=Y_coordinate_column, hue='cluster', 
-                        data=data, palette='viridis', s=100)
-        plt.xlabel(X_coordinate_column)
-        plt.ylabel(Y_coordinate_column)
-        plt.legend(title='Cluster')
-        plt.show()
-
     return birch_clustering, data
-
 
