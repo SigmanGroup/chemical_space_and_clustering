@@ -2,8 +2,8 @@ name: chemspace
 channels:
   - conda-forge
 dependencies:
+  - yellowbrick
   - aom=3.9.1
-  - appnope=0.1.4
   - asttokens=3.0.0
   - attrs=25.4.0
   - bleach=6.2.0
